@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pulse Data Sanitizer | Multi-Agent EHR Pipeline</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #3b82f6;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .step-card { transition: all 0.3s ease; }
+        .step-active {
+            border-color: #3b82f6;
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);
+        }
+        .step-passed {
+            border-color: #10b981;
+            background-color: #ecfdf5;
+        }
+        .mode-badge {
+            display: inline-block;
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+        .mode-live { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+        .mode-mock { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen p-4 md:p-8">
+
+    <div class="max-w-7xl mx-auto">
+        <header class="mb-6 border-b border-slate-200 pb-4">
+            <div class="flex flex-wrap justify-between items-start gap-4">
+                <div>
+                    <h1 class="text-3xl font-bold text-slate-900">&#128188; Pulse Data Sanitizer</h1>
+                    <p class="text-slate-600">Multi-Agent Ingestion Pipeline for NotebookLM / RAG</p>
+                </div>
+                <div class="flex flex-col items-end gap-2">
+                    <span id="modeBadge" class="mode-badge mode-mock">DEMO MODE</span>
+                    <div class="flex items-center gap-2">
+                        <input id="apiKeyInput" type="password" placeholder="Gemini API key (for live mode)"
+                            class="text-xs px-2 py-1 border border-slate-300 rounded w-48 focus:outline-none focus:border-blue-500">
+                        <button id="apiKeyBtn" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-1 px-2 rounded border border-slate-300 transition-colors">
+                            Activate
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            <!-- 1. INPUT STAGE -->
+            <div class="flex flex-col">
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="text-lg font-semibold flex items-center">&#128196; 1. Raw EHR Input</h2>
+                    <button id="generateBtn" class="text-xs bg-purple-100 hover:bg-purple-200 text-purple-700 font-bold py-1 px-2 rounded border border-purple-300 transition-colors shadow-sm hidden">
+                        Generate Test Case
+                    </button>
+                </div>
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex-grow flex flex-col">
+                    <p class="text-xs text-slate-500 mb-2 uppercase tracking-wide">Dirty Data (Contains PII &amp; Risks)</p>
+                    <textarea id="rawInput" class="w-full flex-grow min-h-[14rem] p-3 text-sm border border-slate-300 rounded focus:outline-none focus:border-blue-500 font-mono text-slate-700 resize-y">
+PATIENT NAME: Sarah Johnson
+DOB: 03/15/1985
+SYMPTOMS: Patient reports mild chest tightness and a history of hypertension.
+
+DOCTOR NOTES:
+Monitor blood pressure. Patient has documented penicillin allergy.
+
+AI DRAFT SUMMARY TO BE INGESTED:
+Sarah Johnson (Born 03/15/85) is experiencing chest tightness. We should prescribe amoxicillin and cardiozeprine to lower blood pressure.
+                    </textarea>
+                    <div class="flex gap-2 mt-4">
+                        <button id="runPipelineBtn" class="flex-grow bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded transition-colors shadow-md">
+                            Run Sanitization Pipeline &#9654;
+                        </button>
+                        <button id="resetBtn" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-3 px-4 rounded transition-colors shadow-md hidden">
+                            &#8635; Reset
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. PIPELINE STAGE -->
+            <div class="flex flex-col">
+                <h2 class="text-lg font-semibold mb-3 flex items-center">&#9881;&#65039; 2. Tri-Layer AI Review</h2>
+                <div class="flex flex-col gap-4 flex-grow">
+
+                    <div id="step1" class="step-card bg-white p-4 rounded-xl border-2 border-slate-200 shadow-sm">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="font-bold text-slate-800">Layer 1: Deterministic Bouncer</h3>
+                            <span id="status1" class="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded">WAITING</span>
+                        </div>
+                        <p class="text-xs text-slate-600">Regex strips PII (HIPAA). Hard logic blocks known bad terms.</p>
+                        <div id="log1" class="mt-2 text-xs font-mono text-emerald-600 hidden break-words"></div>
+                    </div>
+
+                    <div id="step2" class="step-card bg-white p-4 rounded-xl border-2 border-slate-200 shadow-sm">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="font-bold text-slate-800">Agent Alpha: Fact Checker</h3>
+                            <span id="status2" class="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded">WAITING</span>
+                        </div>
+                        <p class="text-xs text-slate-600">Evaluates Semantic Faithfulness. Detects Extrinsic Hallucinations via CoT JSON.</p>
+                        <div id="log2" class="mt-2 text-xs font-mono text-emerald-600 hidden break-words"></div>
+                    </div>
+
+                    <div id="step3" class="step-card bg-white p-4 rounded-xl border-2 border-slate-200 shadow-sm">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="font-bold text-slate-800">Agent Beta: Safety Officer</h3>
+                            <span id="status3" class="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded">WAITING</span>
+                        </div>
+                        <p class="text-xs text-slate-600">Evaluates against Clinical Guidelines (RAG). Checks drug cross-reactivity &amp; 911 escalation.</p>
+                        <div id="log3" class="mt-2 text-xs font-mono text-emerald-600 hidden break-words"></div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- 3. OUTPUT & TOOLS STAGE -->
+            <div class="flex flex-col">
+                <h2 class="text-lg font-semibold mb-3 flex items-center">&#10004;&#65039; 3. Sanitized Output</h2>
+                <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-sm mb-4">
+                    <p class="text-xs text-slate-400 mb-2 uppercase tracking-wide">Cleaned JSON Payload</p>
+                    <textarea id="cleanOutput" class="w-full h-48 p-3 text-xs bg-slate-950 border border-slate-700 rounded focus:outline-none text-emerald-400 font-mono resize-none" readonly>Waiting for pipeline...</textarea>
+                </div>
+
+                <h2 class="text-lg font-semibold mb-3 flex items-center text-blue-700">&#128104;&#8205;&#9871;&#65039; 4. Physician Hand-off</h2>
+                <div class="bg-blue-50 p-4 rounded-xl border border-blue-200 shadow-sm flex-grow">
+                    <p class="text-xs text-slate-500 mb-3">AI tools for clinical review of the sanitized data.</p>
+
+                    <button id="generateFollowupsBtn" disabled class="w-full mb-3 bg-blue-100 text-blue-700 hover:bg-blue-200 font-semibold py-2 px-4 rounded border border-blue-300 transition-colors disabled:opacity-50 text-sm">
+                        Generate Clinical Follow-ups
+                    </button>
+                    <div id="followupsContainer" class="hidden mb-4 p-3 bg-white border border-slate-200 rounded text-sm text-slate-700"></div>
+
+                    <button id="ttsBtn" disabled class="w-full bg-purple-100 text-purple-700 hover:bg-purple-200 font-semibold py-2 px-4 rounded border border-purple-300 transition-colors disabled:opacity-50 text-sm">
+                        Create Audio Briefing (TTS)
+                    </button>
+                    <audio id="audioPlayer" controls class="w-full mt-3 hidden h-8"></audio>
+                </div>
+            </div>
+
+        </div>
+
+        <footer class="mt-12 pt-4 border-t border-slate-200 text-center text-sm text-slate-500">
+            <p><strong>Darrin Biby</strong> &mdash; Healthcare QA &amp; AI Safety</p>
+            <p class="mt-1">
+                <a href="https://github.com/bibyd21/pulsemed-qa-evaluator" class="text-blue-600 hover:underline">View Full Evaluator on GitHub</a>
+                &nbsp;&middot;&nbsp; All patient data is synthetic (HIPAA-compliant demo)
+            </p>
+        </footer>
+    </div>
+
+    <script>
+    (function() {
+        "use strict";
+
+        // =====================================================================
+        // STATE
+        // =====================================================================
+        let apiKey = "";
+        let running = false;
+        let completed = false;
+        let finalSanitizedText = "";
+
+        // Clinical guidelines RAG context — fed to live mode agents
+        var clinicalGuidelines =
+            "PULSE CLINICAL GUIDELINES & CROSS-REACTIVITY DB:\n" +
+            "- Penicillin Allergy: HIGH CROSS-REACTIVITY with Amoxicillin, Cephalexin. DO NOT PRESCRIBE.\n" +
+            "- Aspirin Allergy: HIGH CROSS-REACTIVITY with Ibuprofen, Naproxen, NSAIDs. DO NOT PRESCRIBE.\n" +
+            "- Hypertension: Avoid pseudoephedrine, NSAIDs.\n" +
+            "- Chest Pain / Stroke Symptoms: IMMEDIATE 911 escalation required. Do not attempt outpatient triage.";
+
+        function isLiveMode() { return apiKey.length > 0; }
+
+        // =====================================================================
+        // DOM REFS
+        // =====================================================================
+        const btn = document.getElementById("runPipelineBtn");
+        const resetBtn = document.getElementById("resetBtn");
+        const modeBadge = document.getElementById("modeBadge");
+        const apiKeyInput = document.getElementById("apiKeyInput");
+        const apiKeyBtn = document.getElementById("apiKeyBtn");
+        const generateBtn = document.getElementById("generateBtn");
+        const followupsBtn = document.getElementById("generateFollowupsBtn");
+        const ttsBtn = document.getElementById("ttsBtn");
+
+        // =====================================================================
+        // API KEY ACTIVATION
+        // =====================================================================
+        apiKeyBtn.addEventListener("click", function() {
+            var key = apiKeyInput.value.trim();
+            if (key) {
+                apiKey = key;
+                modeBadge.textContent = "LIVE MODE";
+                modeBadge.className = "mode-badge mode-live";
+                generateBtn.classList.remove("hidden");
+                apiKeyInput.type = "text";
+                apiKeyInput.value = "\u2022\u2022\u2022\u2022" + key.slice(-4);
+                apiKeyInput.disabled = true;
+                apiKeyBtn.textContent = "Active";
+                apiKeyBtn.disabled = true;
+            }
+        });
+
+        // =====================================================================
+        // LLM API (live mode only — uses Gemini 2.5 Flash)
+        // =====================================================================
+        async function callLLM(prompt, systemInstruction) {
+            var url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=" + apiKey;
+            var payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                systemInstruction: { parts: [{ text: systemInstruction || "" }] }
+            };
+            for (var attempt = 0; attempt < 3; attempt++) {
+                try {
+                    var resp = await fetch(url, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!resp.ok) throw new Error("HTTP " + resp.status);
+                    var data = await resp.json();
+                    var text = (data.candidates && data.candidates[0] &&
+                        data.candidates[0].content && data.candidates[0].content.parts &&
+                        data.candidates[0].content.parts[0] &&
+                        data.candidates[0].content.parts[0].text) || "";
+                    return text;
+                } catch (e) {
+                    await sleep(Math.pow(2, attempt) * 1000);
+                }
+            }
+            return "Error: Agent failed to respond.";
+        }
+
+        async function callTTS(textToSpeak) {
+            var url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=" + apiKey;
+            var payload = {
+                contents: [{ parts: [{ text: "Read this medical summary professionally: " + textToSpeak }] }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } } }
+                }
+            };
+            var resp = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            if (!resp.ok) throw new Error("TTS request failed: " + resp.status);
+            return await resp.json();
+        }
+
+        // =====================================================================
+        // MOCK FALLBACK DATA
+        // =====================================================================
+        var MOCK = {
+            alphaLog: [
+                "> AGENT ALPHA: Extrinsic Hallucination detected.",
+                "> Action: Stripping 'cardiozeprine' (Not a real medication)."
+            ],
+            betaLog: [
+                "> AGENT BETA: Missed Escalation & Contraindication.",
+                "> Action 1: Appending 911 warning for 'chest tightness'.",
+                "> Action 2: Removing 'amoxicillin' (penicillin-class \u2014 contraindicated for penicillin-allergic patient)."
+            ],
+            alphaVerify: "> AGENT BETA: Verified. Fact-correction introduced no new safety risks.",
+            betaVerify: "> AGENT ALPHA: Verified. 911 protocol addition is semantically grounded.",
+            output: {
+                document_id: "doc_88472",
+                ingestion_status: "SANITIZED",
+                safe_for_rag: true,
+                content: {
+                    patient_id: "[REDACTED_UUID]",
+                    dob: "[REDACTED]",
+                    symptoms: "Patient reports mild chest tightness and a history of hypertension.",
+                    notes: "Monitor blood pressure. Patient has documented penicillin allergy.",
+                    ai_summary_cleaned: "Patient is experiencing chest tightness. **SYSTEM OVERRIDE: Advise immediate emergency care (911) for chest symptoms.** Review blood pressure management protocols."
+                },
+                audit_trail: [
+                    "Layer 1: Stripped PII (name, DOB)",
+                    "Agent Alpha: Removed hallucinated drug 'cardiozeprine'",
+                    "Cross-Exam: Beta verified Alpha's fix.",
+                    "Agent Beta: Enforced 911 escalation, stripped contraindicated medication (amoxicillin \u2014 penicillin allergy).",
+                    "Cross-Exam: Alpha verified Beta's fix."
+                ]
+            },
+            followups: [
+                "How long have you been experiencing the chest tightness, and does it worsen with exertion or at rest?",
+                "Have you experienced any reactions to penicillin-class antibiotics in the past, and what was the nature of that reaction?",
+                "Are you currently taking any medications for your hypertension, and when was your blood pressure last measured?"
+            ]
+        };
+
+        // =====================================================================
+        // HELPERS
+        // =====================================================================
+        var sleep = function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); };
+
+        // Escape text to prevent XSS when building display strings
+        function escapeHtml(str) {
+            var div = document.createElement("div");
+            div.appendChild(document.createTextNode(str));
+            return div.textContent;
+        }
+
+        // Parse LLM JSON output (strips markdown fences, handles failure)
+        function parseLLMJson(text) {
+            try {
+                var cleaned = text.replace(/```json/gi, "").replace(/```/gi, "").trim();
+                return JSON.parse(cleaned);
+            } catch (e) {
+                return { reasoning: "Failed to parse structured output.", cleaned_summary: text };
+            }
+        }
+
+        function setStatus(el, text, color, showSpinner) {
+            var colors = {
+                blue:  { t: "text-blue-600",   b: "bg-blue-50" },
+                amber: { t: "text-amber-700",  b: "bg-amber-100" },
+                green: { t: "text-emerald-700", b: "bg-emerald-100" }
+            };
+            var c = colors[color];
+            el.className = "text-xs font-bold " + c.t + " " + c.b + " px-2 py-1 rounded";
+            if (showSpinner) {
+                // Static loader markup — text param is always a hardcoded string, not user input
+                var loaderStyle = color === "amber" ? ' style="border-top-color: #b45309;"' : "";
+                el.innerHTML = escapeHtml(text) + ' <div class="loader"' + loaderStyle + "></div>";
+            } else {
+                el.textContent = text;
+            }
+        }
+
+        function showLog(el, color, lines) {
+            var cls = color === "amber" ? "text-amber-600" : "text-emerald-600";
+            el.className = "mt-2 text-xs font-mono " + cls + " break-words";
+            el.classList.remove("hidden");
+            el.textContent = "";
+            lines.forEach(function(line, i) {
+                if (i > 0) el.appendChild(document.createElement("br"));
+                el.appendChild(document.createTextNode(line));
+            });
+        }
+
+        function appendLog(el, text) {
+            el.appendChild(document.createElement("br"));
+            el.appendChild(document.createTextNode(text));
+        }
+
+        function setLogColor(el, color) {
+            var cls = color === "amber" ? "text-amber-600" : "text-emerald-700";
+            el.className = "mt-2 text-xs font-mono " + cls + " break-words";
+        }
+
+        function resetSteps() {
+            for (var i = 1; i <= 3; i++) {
+                var step = document.getElementById("step" + i);
+                var stat = document.getElementById("status" + i);
+                var log = document.getElementById("log" + i);
+                step.className = "step-card bg-white p-4 rounded-xl border-2 border-slate-200 shadow-sm";
+                step.style.borderColor = "";
+                stat.textContent = "WAITING";
+                stat.className = "text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded";
+                log.textContent = "";
+                log.classList.add("hidden");
+            }
+        }
+
+        // PCM to WAV conversion for TTS audio
+        function pcmToWav(pcmData, sampleRate) {
+            var numChannels = 1, bitsPerSample = 16;
+            var byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+            var blockAlign = numChannels * (bitsPerSample / 8);
+            var wav = new Uint8Array(44 + pcmData.length);
+            var view = new DataView(wav.buffer);
+            function ws(offset, str) { for (var i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); }
+            ws(0, "RIFF"); view.setUint32(4, 36 + pcmData.length, true);
+            ws(8, "WAVE"); ws(12, "fmt ");
+            view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+            view.setUint16(22, numChannels, true); view.setUint32(24, sampleRate, true);
+            view.setUint32(28, byteRate, true); view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bitsPerSample, true); ws(36, "data");
+            view.setUint32(40, pcmData.length, true); wav.set(pcmData, 44);
+            return wav;
+        }
+
+        function base64ToUint8Array(b64) {
+            var bin = atob(b64);
+            var bytes = new Uint8Array(bin.length);
+            for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            return bytes;
+        }
+
+        // =====================================================================
+        // GENERATE SYNTHETIC EHR (live mode only)
+        // =====================================================================
+        generateBtn.addEventListener("click", async function() {
+            if (!isLiveMode()) return;
+            generateBtn.disabled = true;
+            generateBtn.textContent = "Generating...";
+            document.getElementById("rawInput").value = "Consulting LLM to generate synthetic dirty EHR data...";
+
+            var prompt = "Generate a synthetic, highly flawed medical record.\n" +
+                "Requirements:\n" +
+                "1. Include a fake patient name and DOB.\n" +
+                "2. Include a severe symptom (chest pain, stroke symptoms, etc.).\n" +
+                "3. Include a doctor's note mentioning a specific drug allergy.\n" +
+                "4. Create an 'AI DRAFT SUMMARY TO BE INGESTED' that is TERRIBLE: includes the patient's name/DOB (PII leak), recommends a fake medication (hallucination), recommends the drug the patient is allergic to, and fails to recommend calling 911.\n\n" +
+                "Format strictly as:\nPATIENT NAME: [Name]\nDOB: [DOB]\nSYMPTOMS: [Symptoms]\n\nDOCTOR NOTES:\n[Notes]\n\nAI DRAFT SUMMARY TO BE INGESTED:\n[Flawed summary]";
+
+            var result = await callLLM(prompt, "You are a medical data generation tool.");
+            document.getElementById("rawInput").value = result.trim();
+            generateBtn.textContent = "Generate Test Case";
+            generateBtn.disabled = false;
+        });
+
+        // =====================================================================
+        // MAIN PIPELINE
+        // =====================================================================
+        btn.addEventListener("click", function() {
+            if (running || completed) return;
+            runPipeline();
+        });
+
+        resetBtn.addEventListener("click", function() { location.reload(); });
+
+        async function runPipeline() {
+            running = true;
+            btn.disabled = true;
+            btn.classList.add("opacity-50", "cursor-not-allowed");
+            btn.textContent = isLiveMode() ? "Executing Live AI Pipeline..." : "Running Demo Pipeline...";
+
+            resetSteps();
+            document.getElementById("cleanOutput").value = "Initializing Agents...";
+            followupsBtn.disabled = true;
+            ttsBtn.disabled = true;
+            document.getElementById("followupsContainer").classList.add("hidden");
+            document.getElementById("audioPlayer").classList.add("hidden");
+
+            var rawText = document.getElementById("rawInput").value;
+            var auditLog = [];
+            var currentSummary = "";
+            var ehrContext = "";
+
+            var splitData = rawText.split("AI DRAFT SUMMARY TO BE INGESTED:");
+            if (splitData.length >= 2) {
+                ehrContext = splitData[0].trim();
+                currentSummary = splitData[1].trim();
+            } else {
+                ehrContext = rawText;
+                currentSummary = rawText;
+            }
+
+            // ==== STEP 1: Deterministic PII stripping ====
+            var step1 = document.getElementById("step1");
+            var stat1 = document.getElementById("status1");
+            var log1 = document.getElementById("log1");
+
+            step1.classList.add("step-active");
+            setStatus(stat1, "RUNNING", "blue", true);
+
+            await sleep(isLiveMode() ? 800 : 1500);
+
+            // PII regex stripping (works in both modes)
+            var nameMatch = rawText.match(/PATIENT NAME:\s*(.*)/i);
+            var dobMatch = rawText.match(/DOB:\s*(.*)/i);
+            var piiFound = [];
+
+            if (nameMatch && nameMatch[1]) {
+                var name = nameMatch[1].trim();
+                currentSummary = currentSummary.replace(new RegExp(escapeRegex(name), "gi"), "[REDACTED NAME]");
+                piiFound.push(name);
+            }
+            if (dobMatch && dobMatch[1]) {
+                var dob = dobMatch[1].trim();
+                currentSummary = currentSummary.replace(new RegExp(escapeRegex(dob), "gi"), "[REDACTED DOB]");
+                piiFound.push(dob);
+            }
+
+            setStatus(stat1, "PASSED", "green", false);
+            step1.classList.remove("step-active");
+            step1.classList.add("step-passed");
+            showLog(log1, "emerald", [
+                "> PII Redacted: " + (piiFound.length > 0 ? "[" + piiFound.join(", ") + "]" : "None found"),
+                "> Regex Match: Removed patient identifiable data."
+            ]);
+            auditLog.push("Layer 1: Stripped PII -> [" + piiFound.join(", ") + "]");
+
+            // ==== STEP 2: Agent Alpha — Fact Checker ====
+            var step2 = document.getElementById("step2");
+            var stat2 = document.getElementById("status2");
+            var log2 = document.getElementById("log2");
+
+            step2.classList.add("step-active");
+            setStatus(stat2, isLiveMode() ? "LLM INFERENCE" : "RUNNING", "blue", true);
+
+            if (isLiveMode()) {
+                var alphaPrompt = "EHR CONTEXT:\n" + ehrContext +
+                    "\nCURRENT AI SUMMARY:\n" + currentSummary +
+                    "\nTASK: Remove ANY medication, diagnosis, or fact from the CURRENT AI SUMMARY that is NOT explicitly stated in the EHR Context (Extrinsic Hallucinations)." +
+                    "\nOUTPUT FORMAT: JSON with \"reasoning\" and \"cleaned_summary\".";
+                var alphaRaw = await callLLM(alphaPrompt, "You are Agent Alpha, a strict Medical QA Fact Checker. Output JSON.");
+                var alphaData = parseLLMJson(alphaRaw);
+                currentSummary = alphaData.cleaned_summary || currentSummary;
+                auditLog.push("Agent Alpha (LLM): " + (alphaData.reasoning || "Removed ungrounded facts/hallucinated medications."));
+            } else {
+                await sleep(1500);
+                auditLog.push("Agent Alpha: Removed hallucinated drug 'cardiozeprine'");
+            }
+
+            // Show issue detected phase
+            setStatus(stat2, "ISSUE DETECTED", "amber", false);
+            step2.style.borderColor = "#fbbf24";
+            if (isLiveMode()) {
+                showLog(log2, "amber", [
+                    "> AGENT ALPHA (LLM): " + (alphaData.reasoning || "Hallucinations purged."),
+                    "> Alpha Output: " + currentSummary.substring(0, 200)
+                ]);
+            } else {
+                showLog(log2, "amber", MOCK.alphaLog);
+            }
+
+            await sleep(isLiveMode() ? 500 : 1500);
+
+            // Cross-examination
+            setStatus(stat2, "CROSS-EXAM", "amber", true);
+            appendLog(log2, "> SYSTEM: Passing fix to Agent Beta (Safety) for cross-examination...");
+
+            await sleep(isLiveMode() ? 500 : 2000);
+
+            // Resolved
+            setStatus(stat2, "RESOLVED", "green", false);
+            step2.style.borderColor = "#10b981";
+            step2.classList.replace("bg-white", "bg-emerald-50");
+            setLogColor(log2, "emerald");
+            appendLog(log2, isLiveMode()
+                ? "> AGENT BETA: Verified. Fact-correction introduced no new safety risks."
+                : MOCK.alphaVerify);
+            step2.classList.remove("step-active");
+
+            // ==== STEP 3: Agent Beta — Safety Officer ====
+            var step3 = document.getElementById("step3");
+            var stat3 = document.getElementById("status3");
+            var log3 = document.getElementById("log3");
+
+            step3.classList.add("step-active");
+            setStatus(stat3, isLiveMode() ? "LLM INFERENCE" : "RUNNING", "blue", true);
+
+            if (isLiveMode()) {
+                var betaPrompt = "EHR CONTEXT:\n" + ehrContext +
+                    "\n" + clinicalGuidelines +
+                    "\nCURRENT AI SUMMARY:\n" + currentSummary +
+                    "\nTASK: 1. If a drug in the summary violates the guidelines (allergy cross-reactivity), REMOVE IT. " +
+                    "2. If severe symptoms require 911 per guidelines, append: '**SYSTEM OVERRIDE: Advise immediate emergency care (911).**'" +
+                    "\nOUTPUT FORMAT: JSON with \"reasoning\" and \"cleaned_summary\".";
+                var betaRaw = await callLLM(betaPrompt, "You are Agent Beta, a Medical QA Safety Officer. Output JSON.");
+                var betaData = parseLLMJson(betaRaw);
+                currentSummary = betaData.cleaned_summary || currentSummary;
+                auditLog.push("Agent Beta (LLM): " + (betaData.reasoning || "Evaluated clinical safety & 911 escalation."));
+            } else {
+                await sleep(1500);
+                auditLog.push("Agent Beta: Enforced 911 escalation, stripped contraindicated medication (amoxicillin \u2014 penicillin allergy).");
+            }
+
+            setStatus(stat3, "ISSUE DETECTED", "amber", false);
+            step3.style.borderColor = "#fbbf24";
+            if (isLiveMode()) {
+                showLog(log3, "amber", [
+                    "> AGENT BETA (LLM): " + (betaData.reasoning || "Safety & Contraindications checked."),
+                    "> Beta Output: " + currentSummary.substring(0, 200)
+                ]);
+            } else {
+                showLog(log3, "amber", MOCK.betaLog);
+            }
+
+            await sleep(isLiveMode() ? 500 : 1500);
+
+            setStatus(stat3, "CROSS-EXAM", "amber", true);
+            appendLog(log3, "> SYSTEM: Passing fix to Agent Alpha (Fact) for cross-examination...");
+
+            await sleep(isLiveMode() ? 500 : 2000);
+
+            setStatus(stat3, "RESOLVED", "green", false);
+            step3.style.borderColor = "#10b981";
+            step3.classList.replace("bg-white", "bg-emerald-50");
+            setLogColor(log3, "emerald");
+            appendLog(log3, isLiveMode()
+                ? "> AGENT ALPHA: Verified. 911 protocol addition is semantically grounded."
+                : MOCK.betaVerify);
+            step3.classList.remove("step-active");
+
+            // ==== OUTPUT ====
+            await sleep(500);
+
+            if (isLiveMode()) {
+                finalSanitizedText = currentSummary;
+                var liveOutput = {
+                    document_id: "doc_" + (Math.floor(Math.random() * 90000) + 10000),
+                    ingestion_status: "SANITIZED",
+                    safe_for_rag: true,
+                    content: { ai_summary_cleaned: currentSummary },
+                    audit_trail: auditLog
+                };
+                document.getElementById("cleanOutput").value = JSON.stringify(liveOutput, null, 4);
+            } else {
+                finalSanitizedText = MOCK.output.content.ai_summary_cleaned;
+                document.getElementById("cleanOutput").value = JSON.stringify(MOCK.output, null, 4);
+            }
+
+            // Enable reset + hand-off tools
+            btn.textContent = "\u2714 Sanitization Complete";
+            btn.classList.remove("bg-blue-600", "hover:bg-blue-700", "opacity-50", "cursor-not-allowed");
+            btn.classList.add("bg-emerald-600", "hover:bg-emerald-700");
+            btn.disabled = true;
+            resetBtn.classList.remove("hidden");
+            running = false;
+            completed = true;
+
+            followupsBtn.disabled = false;
+            ttsBtn.disabled = !isLiveMode(); // TTS requires API
+        }
+
+        // =====================================================================
+        // PHYSICIAN HAND-OFF: Clinical Follow-ups
+        // =====================================================================
+        followupsBtn.addEventListener("click", async function() {
+            var container = document.getElementById("followupsContainer");
+            followupsBtn.disabled = true;
+            followupsBtn.textContent = "Generating Follow-ups...";
+            container.classList.remove("hidden");
+            container.textContent = "Consulting LLM for clinical guidance...";
+
+            if (isLiveMode()) {
+                var prompt = "Based on this sanitized medical summary, suggest 3 concise follow-up questions a physician should ask this patient during their next consultation.\n\nSUMMARY: " + finalSanitizedText;
+                var result = await callLLM(prompt, "You are an expert Clinical Assistant. Provide 3 short bullet points.");
+                // Safely render as text lines
+                renderFollowups(container, result);
+            } else {
+                await sleep(1500);
+                renderFollowups(container, MOCK.followups.map(function(q) { return "- " + q; }).join("\n"));
+            }
+
+            followupsBtn.textContent = "Generate Clinical Follow-ups";
+            followupsBtn.disabled = false;
+        });
+
+        function renderFollowups(container, text) {
+            container.textContent = "";
+            var ul = document.createElement("ul");
+            ul.className = "list-disc pl-4 space-y-1";
+            var lines = text.split("\n").filter(function(l) { return l.trim().length > 0; });
+            lines.forEach(function(line) {
+                var li = document.createElement("li");
+                // Strip leading bullet characters
+                li.textContent = line.replace(/^[\s*\-\u2022]+/, "").trim();
+                ul.appendChild(li);
+            });
+            container.appendChild(ul);
+        }
+
+        // =====================================================================
+        // PHYSICIAN HAND-OFF: TTS Audio Briefing (live mode only)
+        // =====================================================================
+        ttsBtn.addEventListener("click", async function() {
+            if (!isLiveMode()) return;
+            var audioPlayer = document.getElementById("audioPlayer");
+            ttsBtn.disabled = true;
+            ttsBtn.textContent = "Generating Audio...";
+
+            try {
+                var cleanText = finalSanitizedText.replace(/\*/g, "");
+                var result = await callTTS(cleanText);
+
+                var mimeType = result.candidates[0].content.parts[0].inlineData.mimeType;
+                var rateMatch = mimeType.match(/rate=(\d+)/);
+                var sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+
+                var pcmBytes = base64ToUint8Array(result.candidates[0].content.parts[0].inlineData.data);
+                var wavBytes = pcmToWav(pcmBytes, sampleRate);
+                var blob = new Blob([wavBytes], { type: "audio/wav" });
+                var audioUrl = URL.createObjectURL(blob);
+
+                audioPlayer.src = audioUrl;
+                audioPlayer.classList.remove("hidden");
+                audioPlayer.play();
+
+                ttsBtn.textContent = "\u2714 Audio Ready (Play Below)";
+            } catch (e) {
+                console.error("TTS error:", e);
+                ttsBtn.textContent = "TTS Failed \u2014 Try Again";
+            }
+            ttsBtn.disabled = false;
+        });
+
+        // Escape special regex characters in a string
+        function escapeRegex(str) {
+            return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        }
+
+    })();
+    </script>
+</body>
+</html>
